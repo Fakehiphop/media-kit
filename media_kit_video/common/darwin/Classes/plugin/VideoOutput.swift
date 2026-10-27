@@ -88,13 +88,12 @@ public class VideoOutput: NSObject {
     super.init()
 
     #if canImport(UIKit)
-      renderGate.setEnabled(UIApplication.shared.applicationState == .active)
+      // PiliPlus-同构：不在退后台时关闭渲染闸门。
+      // 上游 media_kit 从无此闸门，PiliPlus 用的就是上游版本，后台照样出帧；
+      // 关闭闸门会让 textureFrameAvailable 停止，PiP 永远停在最后一帧。
+      // 这里只在回到前台时补一次刷新，闸门恒为开启。
+      renderGate.setEnabled(true)
       lifecycleObservers = [
-        NotificationCenter.default.addObserver(
-          forName: UIApplication.willResignActiveNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-          self?.renderGate.setEnabled(false)
-        },
         NotificationCenter.default.addObserver(
           forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -158,12 +157,10 @@ public class VideoOutput: NSObject {
     var hardwareTexture: ResizableTextureProtocol?
     if enableHardwareAcceleration {
       #if canImport(UIKit)
-        // Keep the state check and GL initialization in one platform-thread
-        // turn: an activation change must not slip between them while the
-        // worker is queued. Rendering remains on the worker, with the same
-        // EAGLContext made current by TextureHW for every render operation.
+        // PiliPlus-同构：上游在此不做 applicationState 前置判断。保留主线程
+        // 创建（GL 上下文需要平台线程），但不再因"当前不在前台"而放弃硬件
+        // 纹理——否则后台重建输出会静默降级、或直接无纹理可用。
         DispatchQueue.main.sync {
-          guard UIApplication.shared.applicationState == .active else { return }
           renderGate.runIfEnabled {
             hardwareTexture = TextureHW(handle: handle, updateCallback: update)
           }
